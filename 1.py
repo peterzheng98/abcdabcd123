@@ -6,7 +6,9 @@ import sys
 import time
 import queue
 import multiprocessing
-
+import re
+import subprocess
+import shutil
 
 # base path
 repo_archive_path = '/srv/samba/backup/compiler-judge/archive'
@@ -17,8 +19,18 @@ log_path = '/srv/samba/backup/compiler-judge/log/{}'.format(sys.argv[1])
 dockerfile_template = '''FROM {}
 
 COPY . /compiler
-RUN cd /compiler && make build'''
+RUN cd /compiler && make build
+ENTRYPOINNT ["make", "run"]
+'''
 
+# for semantic
+semantic_check_root = '' # the root path for semantic check
+semantic_check_lib  = '.txt' # the lib for semantic check
+
+# for codegen
+ravel_bin_root = ''
+codegen_check_root = '' # the root path for semantic check
+codegen_check_lib  = '.txt' # the lib for semantic check
 
 # set logging with date time, and both write to files
 logging.basicConfig(level=logging.DEBUG,
@@ -53,6 +65,97 @@ def build_image_worker(path, tag, rm, container_limits, network_mode, q, user_id
         logging.error('[worker]build docker image general failed {} (request {}, url {})'.format(e, user_id, url))
         q.put((2, ''))
 
+def extract_input_output_exitcode_verdict(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        verdict = 'Verdict: Success\n' in file.readlines()
+        content = file.read()
+    input_regex = r'Input:\n=== input ===\n(.*?)\n=== end ==='
+    output_regex = r'Output:\n=== output ===\n(.*?)\n=== end ==='
+    exitcode_regex = r'ExitCode: (.+)'
+    input_match = re.search(input_regex, content, re.DOTALL)
+    output_match = re.search(output_regex, content, re.DOTALL)
+    exitcode_match = re.search(exitcode_regex, content)
+    if input_match:
+        input_data = input_match.group(1).strip()
+    else:
+        input_data = ""
+    if output_match:
+        output_data = output_match.group(1).strip()
+    else:
+        output_data = ""
+    if exitcode_match:
+        exitcode = exitcode_match.group(1).strip()
+    else:
+        exitcode = ""
+    return content, input_data, output_data, exitcode, verdict
+
+def run_semantic(path, tag, q, user_id, url, test_path, testcase):
+    client = docker.from_env()
+    content, input_data, output_data, exitcode, verdict = extract_input_output_exitcode_verdict(test_path)
+    try:
+        process = subprocess.Popen(
+            ['docker', 'run', '--rm', '-i', tag],
+            cwd=path,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            # shell=True
+        )
+        stdout, stderr = process.communicate(input=content)
+        if (process.returncode == 0) == verdict:
+            statue = 'AC'
+        else:
+            statue = 'WA'
+        q.put((0, statue))
+        logging.info('[worker]run semantic check success {} statu:{} (request {}, url {})'.format(testcase, statue, user_id, url))
+    except Exception as e:
+        q.put((2, ''))
+        logging.error('[worker]run semantic check failed {} error:{} (request {}, url {})'.format(testcase, e, user_id, url))
+
+def run_codegen(path, tag, q, user_id, url, test_path, testcase):
+    client = docker.from_env()
+    content, input_data, output_data, exitcode, verdict = extract_input_output_exitcode_verdict(test_path)
+    try:
+        process = subprocess.Popen(
+            ['docker', 'run', '--rm', '-i', tag],
+            cwd=path,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            # shell=True
+        )
+        stdout, stderr = process.communicate(input=content)
+        if process.returncode == 0:
+            statue = 'AC'
+            logging.info('[worker]run codegen semantic check success {} statu:{} (request {}, url {})'.format(testcase, statue, user_id, url))
+            ravel_user_testspace = os.path.join(ravel_bin_root, user_id)
+            with open(os.path.join(ravel_user_testspace, 'test.s'), "w") as f_ravel:
+                f_ravel.write(stdout)
+                f_ravel.flush()
+            with open(os.path.join(ravel_user_testspace, 'test.in'), "w") as f_ravel:
+                f_ravel.write(input_data)
+                f_ravel.flush()
+            process2 = subprocess.Popen(
+                f'./ravel_test --input-file=./{user_id}/test.in --output-file=./{user_id}/test.out ./{user_id}/test.s ./{user_id}/builtin.s',
+                cwd=ravel_bin_root,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                # shell=True
+            )
+            stdout, stderr = process2.communicate()
+            # TODO: 
+            q.put((0, statue))
+        else:
+            statue = 'WA'
+            q.put((1, statue))
+            logging.info('[worker]run codegen semantic check wrong {} statu:{} (request {}, url {})'.format(testcase, statue, user_id, url))
+    except Exception as e:
+        q.put((2, ''))
+        logging.error('[worker]run codegen semantic check failed {} error:{} (request {}, url {})'.format(testcase, e, user_id, url))
 
 def run_compile(user_id, url, docker_id):
     # read available image from file: docker_image_list
@@ -65,7 +168,7 @@ def run_compile(user_id, url, docker_id):
         image_list = image_list_new
     # check if the image is available
     if docker_id not in image_list:
-        logging.error('docker image {} is not available (request {}, url {})'.format(docker_id))
+        logging.error('docker image {} is not available (request {}, url {})'.format(docker_id, user_id, url))
         return False
     
     # generate a new uuid for this compile
@@ -117,8 +220,37 @@ def run_compile(user_id, url, docker_id):
             return False
         else:
             logging.info('build docker image success (request {}, url {})'.format(user_id, url))
-            return True
+            # return True
     
+    semantic_testcases = open(semantic_check_lib, 'r').readlines()
+    semantic_ans = []
+    for testcase in semantic_testcases:
+        test_path = os.path.join(semantic_check_root, testcase)
+        p = multiprocessing.Process(target=run_semantic, args=(compile_path, user_id + ':latest', q, user_id, url, test_path, testcase))
+        p.start()
+        p.join(15)
+        if p.is_alive():
+            p.terminate()
+            p.join()
+            logging.error('run semantic check timeout {} (request {}, url {})'.format(testcase, user_id, url))
+            semantic_ans.append((False, 'TLE'))
+        else:
+            result = q.get()
+            if result[0] != 0:
+                logging.error('run semantic check failed (request {}, url {})'.format(user_id, url))
+                semantic_ans.append((False, 'RE'))
+            else:
+                logging.info('run semantic check success (request {}, url {})'.format(user_id, url))
+                semantic_ans.append((result[1] == 'AC', result[1]))
     
-    
-    
+    codegen_testcases = open(codegen_check_lib, 'r').readlines()
+    codegen_ans = []
+    ravel_user_testspace = os.path.join(ravel_bin_root, user_id)
+    if not os.path.exists(ravel_user_testspace):
+        os.mkdir(ravel_user_testspace)
+    builtin_path = os.path.join(os.path.join(compile_path, 'compiler'), 'builtin.s')
+    if os.path.exists(builtin_path):
+        shutil.copy(builtin_path, os.path.join(ravel_user_testspace, 'builtin.s'))
+
+    for testcase in codegen_testcases:
+        test_path = os.path.join(codegen_check_root, testcase)
