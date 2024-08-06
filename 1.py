@@ -10,6 +10,7 @@ import re
 import subprocess
 import shutil
 import datetime
+import redis
 
 # base path
 repo_archive_path = '/srv/samba/backup/compiler-judge/archive'
@@ -339,12 +340,12 @@ def run_compile(connection, attempt_id, user_id, url, docker_id, submit_timestam
     #     test_path = os.path.join(codegen_check_root, testcase)
 
 import redis
-BASE_HOST = "" # TODO
+BASE_HOST = "10.5.5.106" # TODO
 r = redis.Redis(host=BASE_HOST, port=6379, decode_responses=True)
 mysql_connection = create_mysql_connection(host_name="", user_name="", user_password="", db_name="compiler")
 
 def get_stuid_image_repo(r):
-    element = r.lpop() # pop from what?
+    element = r.lpop('judge') # pop from what?
     elements = element.split('|')
     stuid = elements[0]
     image_id = elements[1]
