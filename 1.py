@@ -27,41 +27,6 @@ logging.basicConfig(level=logging.DEBUG,
 
 GlobalName = sys.argv[2]
 
-    
-    # # semantic_testcases = open(semantic_check_lib, 'r').readlines()
-    # semantic_ans = []
-    # semantic_testcases = fetch_testcase_by_phase(connection, 1)
-
-    # for testcase in semantic_testcases:
-    #     p = multiprocessing.Process(target=run_semantic, args=(1, compile_path, user_id + ':latest', q, user_id, url, testcase, attempt_id, submit_timestamp, connection))
-    #     p.start()
-    #     p.join(15)
-    #     if p.is_alive():
-    #         p.terminate()
-    #         p.join()
-    #         logging.error('run semantic check timeout {} (request {}, url {})'.format(testcase, user_id, url))
-    #         semantic_ans.append((False, 'TLE'))
-    #     else:
-    #         result = q.get()
-    #         if result[0] != 0:
-    #             logging.error('run semantic check failed (request {}, url {})'.format(user_id, url))
-    #             semantic_ans.append((False, 'RE'))
-    #         else:
-    #             logging.info('run semantic check success (request {}, url {})'.format(user_id, url))
-    #             semantic_ans.append((result[1] == 'AC', result[1]))
-    
-    # # codegen_testcases = open(codegen_check_lib, 'r').readlines()
-    # # codegen_ans = []
-    # # ravel_user_testspace = os.path.join(ravel_bin_root, user_id)
-    # # if not os.path.exists(ravel_user_testspace):
-    # #     os.mkdir(ravel_user_testspace)
-    # # builtin_path = os.path.join(os.path.join(compile_path, 'compiler'), 'builtin.s')
-    # # if os.path.exists(builtin_path):
-    # #     shutil.copy(builtin_path, os.path.join(ravel_user_testspace, 'builtin.s'))
-
-    # # for testcase in codegen_testcases:
-    # #     test_path = os.path.join(codegen_check_root, testcase)
-
 r = redis.Redis(host=BASE_HOST, port=6379, decode_responses=True)
 mysql_connection = create_mysql_connection(host_name="", user_name="", user_password="", db_name="compiler")
 
@@ -90,7 +55,21 @@ def process():
         logging.info('User {} failed at stage build'.format(stuid))
         return False
     logging.info('User {} success at stage build'.format(stuid))
-    result = run_semantic(mysql_connection, attempt_id, uid, repo_url, image_id, submit_timestamp, compile_id)
+    result, _ = run_semantic(mysql_connection, attempt_id, uid, repo_url, image_id, submit_timestamp, compile_id)
+    if not result:
+        logging.info('User {} failed at stage 1 semantic'.format(stuid))
+        update_submit_status(mysql_connection, attempt_id, 'status', 5)
+        return False
+    logging.info('User {} success at stage 1 semantic'.format(stuid))
+    update_submit_status(mysql_connection, attempt_id, 'status', 6)
+    result, _ = run_semantic(mysql_connection, attempt_id, uid, repo_url, image_id, submit_timestamp, compile_id, isExtend=True)
+    if not result:
+        logging.info('User {} failed at stage 2 semantic'.format(stuid))
+        update_submit_status(mysql_connection, attempt_id, 'status', 7)
+        return False
+    logging.info('User {} success at stage 2 semantic'.format(stuid))
+    update_submit_status(mysql_connection, attempt_id, 'status', 8)
+    
 
 
 if __name__ == '__main__':
