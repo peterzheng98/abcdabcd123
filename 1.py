@@ -18,16 +18,21 @@ from MySQLHelper import *
 from CompilePhase import *
 from SemanticPhase import *
 
+repo_archive_path = '/srv/samba/backup/compiler-judge/archive/{}'.format(sys.argv[1])
+repo_build_root_path = '/srv/samba/backup/compiler-judge/temp/{}'.format(sys.argv[1])
+log_path = '/srv/samba/backup/compiler-judge/log/{}.log'.format(sys.argv[1])
+output_logs = '/srv/samba/backup/compiler-judge/output-logs/{}'.format(sys.argv[1])
+
 # set logging with date time, and both write to files
 logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+                    format='%(asctime)s %(filename)s[line:%(lineno)d] [%(levelname)s] %(message)s',
                     datefmt='%a, %d %b %Y %H:%M:%S',
                     filename=log_path,
                     filemode='a')
 # also print to stdout
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s')
+formatter = logging.Formatter('%(asctime)s %(filename)s[line:%(lineno)d] [%(levelname)s] %(message)s')
 console.setFormatter(formatter)
 logging.getLogger('').addHandler(console)
 
@@ -50,9 +55,8 @@ def get_stuid_image_repo(r):
 
 def process(mysql_connection, redis_handler):
     stuid, image_id, repo_url = get_stuid_image_repo(redis_handler)
-    logging.info('User {} start'.format(stuid))
     if stuid is None:
-        logging.info('No element in judge')
+        logging.info('No User in judge')
         return False
     uid = select_uid_from_stuid(connection=mysql_connection, stuid=stuid)
     if uid is None:
