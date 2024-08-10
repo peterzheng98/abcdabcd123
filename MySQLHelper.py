@@ -66,7 +66,7 @@ def create_a_submit(connection, uid, stuid, git_repo):
 INSERT INTO compiler.JudgeAttempts (
     user_id, problem_id, submission_time, status, githash, git_message, attempt_hash, stuid
 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
-    submit_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    submit_timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     data = (uid, 0, submit_timestamp, 1, 'None', 'Under Cloning', 'None', stuid)
     return execute_query(connection, insert_submit_query, data, info="create a new submit"), submit_timestamp
 
