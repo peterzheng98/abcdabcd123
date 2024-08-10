@@ -44,12 +44,16 @@ def get_stuid_image_repo(r):
 
 def process(mysql_connection, redis_handler):
     stuid, image_id, repo_url = get_stuid_image_repo(redis_handler)
+    logging.info('User {} start'.format(stuid))
     if stuid is None:
+        logging.info('No element in judge')
         return False
     uid = select_uid_from_stuid(connection=mysql_connection, stuid=stuid)
     if uid is None:
+        logging.info('User {} not found'.format(stuid))
         return False
     attempt_id, submit_timestamp = create_a_submit(connection=mysql_connection, uid=uid, stuid=stuid, git_repo=repo_url)
+    logging.info('User {} create a submit'.format(stuid))
     result, compile_id = run_compile(mysql_connection, attempt_id, uid, repo_url, image_id, submit_timestamp)
     if not result:
         logging.info('User {} failed at stage build'.format(stuid))
@@ -75,4 +79,5 @@ def process(mysql_connection, redis_handler):
 if __name__ == '__main__':
     while True:
         process(mysql_connection, r)
+        logging.info('sleep 1s')
         time.sleep(1)
