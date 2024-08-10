@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.DEBUG,
                     filename=log_path,
                     filemode='a')
 
-GlobalName = sys.argv[2]
+GlobalName = sys.argv[1]
 
 r = redis.Redis(host=BASE_HOST, port=6379, decode_responses=True)
 mysql_connection = create_mysql_connection(host_name="", user_name="", user_password="", db_name="compiler")
@@ -42,8 +42,8 @@ def get_stuid_image_repo(r):
     logging.info('receive judge request {} {} {}'.format(stuid, image_id, repo_url))
     return stuid, image_id, repo_url
 
-def process():
-    stuid, image_id, repo_url = get_stuid_image_repo(r)
+def process(mysql_connection, redis_handler):
+    stuid, image_id, repo_url = get_stuid_image_repo(redis_handler)
     if stuid is None:
         return False
     uid = select_uid_from_stuid(connection=mysql_connection, stuid=stuid)
@@ -74,5 +74,5 @@ def process():
 
 if __name__ == '__main__':
     while True:
-        process()
+        process(mysql_connection, r)
         time.sleep(1)
